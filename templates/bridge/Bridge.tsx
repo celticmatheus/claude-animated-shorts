@@ -39,10 +39,25 @@ const makeBloom = () => {
 
 const fwd = new THREE.Vector3(), fpt = new THREE.Vector3();
 
+/** Headless renders (current @remotion/three + @react-three/postprocessing): ThreeCanvas advances R3F once per frame,
+ *  before the EffectComposer has drawn, so stills came out empty. Advance once more after commit, then release the frame. */
+const Settle: React.FC = () => {
+  const f = useCurrentFrame();
+  const advance = useThree((s) => s.advance);
+  useEffect(() => {
+    const h = delayRender("settle composer");
+    const id = requestAnimationFrame(() => { advance(performance.now()); continueRender(h); });
+    return () => { cancelAnimationFrame(id); continueRender(h); };
+  }, [f, advance]);
+  return null;
+};
+
 const useKit = () => {
   const [kit, setKit] = useState<Kit | null>(null);
   const [handle] = useState(() => delayRender("bridge kit"));
-  useEffect(() => { loadKit().then((k) => { setKit(k); continueRender(handle); }); }, [handle]);
+  useEffect(() => { loadKit().then(setKit); }, []);
+  // release only after the kit-dependent tree (and ThreeCanvas's own delayRender) has mounted, or headless renders capture an empty frame
+  useEffect(() => { if (kit) continueRender(handle); }, [kit, handle]);
   return kit;
 };
 
@@ -95,9 +110,10 @@ const Inner: React.FC<{ id: number; kit: Kit }> = ({ id, kit }) => {
 const dprOverride = () => (getInputProps() as { post?: { dpr?: number } }).post?.dpr;
 const ShotView: React.FC<{ id: number; kit: Kit; alpha: number }> = ({ id, kit, alpha }) => (
   <AbsoluteFill style={{ opacity: alpha }}>
-    <ThreeCanvas width={1080} height={1920} {...(dprOverride() ? { dpr: dprOverride() } : {})} shadows gl={{ antialias: false, stencil: false, powerPreference: "high-performance", toneMappingExposure: 1.0 }}
+    <ThreeCanvas width={1080} height={1920} {...(dprOverride() ? { dpr: dprOverride() } : {})} shadows gl={{ antialias: false, stencil: false, powerPreference: "high-performance", preserveDrawingBuffer: true, toneMappingExposure: 1.0 }}
       camera={{ fov: 40, near: 0.2, far: 1500 }}>
       <Inner id={id} kit={kit} />
+      <Settle />
     </ThreeCanvas>
   </AbsoluteFill>
 );
